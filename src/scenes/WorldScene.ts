@@ -1,13 +1,15 @@
 import Phaser from "phaser";
 import { CHARACTERS, type Character } from "../data/characters";
 import { LOCATIONS, type ExitDef } from "../data/locations";
-import { registerSpriteImages } from "../entities/sprites";
+import { registerSpriteImages, spriteScale } from "../entities/sprites";
 import { Dialogue } from "../ui/Dialogue";
 import { SpeechBubble } from "../ui/SpeechBubble";
 import { SlideViewer } from "../ui/SlideViewer";
 import { Projector } from "../ui/Projector";
 import { LocationMenu } from "../ui/LocationMenu";
+import { KeyboardRouter } from "../ui/KeyboardRouter";
 import { showCharacterSelect } from "../ui/CharacterSelect";
+import { LocationLoader } from "./LocationLoader";
 
 const SPEED = 400;
 const INTERACT_DIST = 80;
@@ -26,6 +28,8 @@ export class WorldScene extends Phaser.Scene {
   private npcs: Character[] = [];
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
+  private router!: KeyboardRouter;
+  private loader!: LocationLoader;
   private dialogue!: Dialogue;
   private bubble!: SpeechBubble;
   private slides!: SlideViewer;
@@ -38,7 +42,6 @@ export class WorldScene extends Phaser.Scene {
   private chosen!: Character;
   private locIndex = 0;
   private atParking = false;
-  private scenery: Phaser.GameObjects.GameObject[] = []; // фон, overlay, NPC текущей локации
   private menu!: LocationMenu;
   private exitBtn = document.getElementById("exitBtn") as HTMLButtonElement;
   private exitLabel = document.getElementById("exitLabel") as HTMLSpanElement;
@@ -51,6 +54,8 @@ export class WorldScene extends Phaser.Scene {
   create(): void {
     registerSpriteImages(this);
     this.walls = this.physics.add.staticGroup();
+    this.router = new KeyboardRouter();
+    this.loader = new LocationLoader(this, this.walls, TARGET_H, DEPTH.doorOverlay);
 
     this.bubble = new SpeechBubble(this, DEPTH.bubble);
     this.projector = new Projector(this, (slides, index) => {
@@ -88,100 +93,70 @@ export class WorldScene extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys("W,A,S,D,SPACE") as Record<string, Phaser.Input.Keyboard.Key>;
 
     this.menu = new LocationMenu((to, spawn) => this.goTo(to, spawn));
-    const triggerExit = () => {
-      if (this.currentExit) this.goTo(this.currentExit.to, this.currentExit.spawn);
-    };
-    this.exitBtn.onclick = triggerExit;
-    window.addEventListener("keydown", (e) => {
-      if (e.code === "Enter") triggerExit();
+
+    // Потребители ввода по приоритету: слайды поверх диалога поверх меню парковки,
+    // ниже — выход в дверь по Enter (когда нет модалок и игрок стоит в зоне выхода).
+    this.router.register(this.slides);
+    this.router.register(this.dialogue);
+    this.router.register(this.menu);
+    this.router.register({
+      isActive: () =>
+        this.started && !this.atParking && !this.dialogue.isOpen && this.currentExit !== null,
+      handleKey: (e) => {
+        if (e.code !== "Enter") return false;
+        this.triggerExit();
+        return true;
+      },
     });
 
-    showCharacterSelect(CHARACTERS, (chosen) => this.startAs(chosen));
-  }
+    this.exitBtn.onclick = () => this.triggerExit();
 
-  private spriteScale(sprite: string): number {
-    const frame = this.textures.get(sprite).getSourceImage();
-    return TARGET_H / frame.height;
+    showCharacterSelect(CHARACTERS, (chosen) => this.startAs(chosen));
   }
 
   private startAs(chosen: Character): void {
     this.chosen = chosen;
     this.player = this.physics.add.sprite(chosen.x, chosen.y, chosen.sprite);
-    this.player.setScale(this.spriteScale(chosen.sprite)).setDepth(DEPTH.player);
+    this.player.setScale(spriteScale(this, chosen.sprite, TARGET_H)).setDepth(DEPTH.player);
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.walls);
 
-    this.loadLocation(0, { x: chosen.x, y: chosen.y });
+    // Игрок стартует на позиции своего персонажа в главном офисе — спавн не задаём.
+    this.loadLocation(0);
     this.started = true;
   }
 
-  // Строит локацию index, снося предыдущую, и ставит игрока в spawn.
-  private loadLocation(index: number, spawn: { x: number; y: number }): void {
+  // Строит локацию index, снося предыдущую. Если задан spawnName — ставит игрока
+  // в одноимённую точку слоя spawns этой локации.
+  private loadLocation(index: number, spawnName?: string): void {
     const cfg = LOCATIONS[index];
     this.locIndex = index;
     this.atParking = !!cfg.isParking;
 
-    this.scenery.forEach((o) => o.destroy());
-    this.scenery = [];
-    this.walls.clear(true, true);
+    const { npcs, spawns } = this.loader.load(cfg, index, this.chosen.id);
+    this.npcs = npcs;
 
-    this.scenery.push(this.add.image(0, 0, cfg.bg).setOrigin(0).setDepth(0));
-
-    if (cfg.overlay && this.textures.exists(cfg.overlay)) {
-      this.scenery.push(this.add.image(0, 0, cfg.overlay).setOrigin(0).setDepth(DEPTH.doorOverlay));
-    }
-
-    if (cfg.map && this.cache.tilemap.exists(cfg.map)) {
-      const map = this.make.tilemap({ key: cfg.map });
-      map.getObjectLayer("collision")?.objects.forEach((o) => {
-        const w = o.width ?? 0;
-        const h = o.height ?? 0;
-        const rect = this.add.rectangle((o.x ?? 0) + w / 2, (o.y ?? 0) + h / 2, w, h);
-        this.physics.add.existing(rect, true);
-        this.walls.add(rect);
-      });
-    }
-
-    this.npcs = this.atParking
-      ? []
-      : CHARACTERS.filter((c) => (c.location ?? 1) === index + 1 && c.id !== this.chosen.id);
-    for (const c of this.npcs) {
-      this.scenery.push(
-        this.add
-          .image(c.x, c.y, c.sprite)
-          .setScale(this.spriteScale(c.sprite))
-          .setOrigin(0.5, 0.5)
-          .setFlipX(!!c.faceRight)
-          .setDepth(c.y),
-      );
-      this.scenery.push(
-        this.add
-          .text(c.x, c.y - TARGET_H * 0.62, c.name, {
-            fontFamily: "Trebuchet MS",
-            fontSize: "13px",
-            color: "#ffffff",
-            backgroundColor: "#00000099",
-            padding: { x: 5, y: 2 },
-          })
-          .setOrigin(0.5)
-          .setDepth(c.y),
-      );
-    }
-
-    // На парковке ходить нельзя — прячем игрока и показываем меню локаций.
     this.player.setVisible(!this.atParking);
     if (this.atParking) {
+      // На парковке ходить нельзя — прячем игрока и показываем меню локаций.
       this.player.setVelocity(0);
       this.menu.show(cfg);
     } else {
       this.menu.hide();
-      this.player.setPosition(spawn.x, spawn.y);
+      if (spawnName !== undefined) {
+        const p = spawns.get(spawnName);
+        if (p) this.player.setPosition(p.x, p.y);
+      }
     }
   }
 
-  private goTo(to: number, spawn: { x: number; y: number }): void {
+  private goTo(to: number, spawn: string): void {
     this.showExit(null);
     this.loadLocation(to, spawn);
+  }
+
+  private triggerExit(): void {
+    if (this.currentExit) this.goTo(this.currentExit.to, this.currentExit.spawn);
   }
 
   private showExit(exit: ExitDef | null): void {

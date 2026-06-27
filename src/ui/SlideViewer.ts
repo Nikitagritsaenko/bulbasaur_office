@@ -1,8 +1,10 @@
+import { pixelate } from "../entities/sprites";
 import { SAMPLE_SLIDES } from "./slides";
+import type { KeyConsumer } from "./KeyboardRouter";
 
 const PIXEL_SIZE = 450; // длинная сторона уменьшенной копии в пиксельном режиме
 
-export class SlideViewer {
+export class SlideViewer implements KeyConsumer {
   isOpen = false;
 
   private root = document.getElementById("slides")!;
@@ -25,7 +27,6 @@ export class SlideViewer {
     this.img.onload = () => {
       if (this.root.classList.contains("pixel")) this.drawPixel();
     };
-    window.addEventListener("keydown", (e) => this.onKey(e));
   }
 
   // Разворачивает слайды на весь экран. Канон — пиксельный вид по умолчанию.
@@ -72,7 +73,7 @@ export class SlideViewer {
     if (this.root.classList.toggle("pixel")) this.drawPixel();
   }
 
-  // Пикселизация: рисуем уменьшенную копию и растягиваем её обратно без сглаживания.
+  // Пикселизация: уменьшаем копию и растягиваем обратно до натурального размера.
   private drawPixel(): void {
     const { naturalWidth: w, naturalHeight: h } = this.img;
     if (!w || !h) return;
@@ -81,25 +82,28 @@ export class SlideViewer {
     const lowW = Math.max(1, Math.round(w * scale));
     const lowH = Math.max(1, Math.round(h * scale));
 
-    const small = document.createElement("canvas");
-    small.width = lowW;
-    small.height = lowH;
-    small.getContext("2d")!.drawImage(this.img, 0, 0, lowW, lowH);
-
     this.canvas.width = w;
     this.canvas.height = h;
-    const ctx = this.canvas.getContext("2d")!;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(small, 0, 0, lowW, lowH, 0, 0, w, h);
+    this.canvas.getContext("2d")!.drawImage(pixelate(this.img, w, h, lowW, lowH), 0, 0);
   }
 
-  private onKey(e: KeyboardEvent): void {
-    if (!this.isOpen) return;
-    if (e.code === "ArrowLeft") this.go(-1);
-    else if (e.code === "ArrowRight") this.go(1);
-    else if (e.code === "Escape") this.close();
-    else return;
-    // Пока открыты слайды, не отдаём клавишу меню диалога (оно слушает window позже нас).
-    e.stopImmediatePropagation();
+  isActive(): boolean {
+    return this.isOpen;
+  }
+
+  handleKey(e: KeyboardEvent): boolean {
+    switch (e.code) {
+      case "ArrowLeft":
+        this.go(-1);
+        return true;
+      case "ArrowRight":
+        this.go(1);
+        return true;
+      case "Escape":
+        this.close();
+        return true;
+      default:
+        return false;
+    }
   }
 }

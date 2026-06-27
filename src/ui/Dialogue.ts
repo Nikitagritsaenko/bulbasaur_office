@@ -1,4 +1,5 @@
 import type { Character } from "../data/characters";
+import type { KeyConsumer } from "./KeyboardRouter";
 
 type Action = "who" | "doing" | "did" | "bye" | "show" | "later";
 interface Option {
@@ -25,7 +26,7 @@ interface DialogueHandlers {
   onClose: () => void;
 }
 
-export class Dialogue {
+export class Dialogue implements KeyConsumer {
   isOpen = false;
   paused = false; // true, пока поверх открыто окно слайдов — клавиши меню игнорируются
 
@@ -36,9 +37,7 @@ export class Dialogue {
   private index = 0;
   private npc: Character | null = null;
 
-  constructor(private handlers: DialogueHandlers) {
-    window.addEventListener("keydown", (e) => this.onKey(e));
-  }
+  constructor(private handlers: DialogueHandlers) {}
 
   open(npc: Character): void {
     this.npc = npc;
@@ -108,18 +107,31 @@ export class Dialogue {
     }
   }
 
-  private onKey(e: KeyboardEvent): void {
-    if (!this.isOpen || this.paused) return;
-    if (e.code === "ArrowLeft" || e.code === "KeyA") {
-      this.index = (this.index + this.options.length - 1) % this.options.length;
-      this.refreshSel();
-    } else if (e.code === "ArrowRight" || e.code === "KeyD") {
-      this.index = (this.index + 1) % this.options.length;
-      this.refreshSel();
-    } else if (e.code === "Enter" || e.code === "Space") {
-      this.choose(this.index);
-    } else if (e.code === "Escape") {
-      this.close();
+  isActive(): boolean {
+    return this.isOpen && !this.paused;
+  }
+
+  handleKey(e: KeyboardEvent): boolean {
+    switch (e.code) {
+      case "ArrowLeft":
+      case "KeyA":
+        this.index = (this.index + this.options.length - 1) % this.options.length;
+        this.refreshSel();
+        return true;
+      case "ArrowRight":
+      case "KeyD":
+        this.index = (this.index + 1) % this.options.length;
+        this.refreshSel();
+        return true;
+      case "Enter":
+      case "Space":
+        this.choose(this.index);
+        return true;
+      case "Escape":
+        this.close();
+        return true;
+      default:
+        return false;
     }
   }
 }

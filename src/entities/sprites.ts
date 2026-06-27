@@ -34,6 +34,11 @@ export function registerSpriteImages(scene: Phaser.Scene): void {
 
 export const getSpriteImage = (k: SpriteKey) => images.get(k)!;
 
+// Масштаб спрайта, чтобы его высота на экране равнялась targetH пикселям.
+export function spriteScale(scene: Phaser.Scene, sprite: SpriteKey, targetH: number): number {
+  return targetH / scene.textures.get(sprite).getSourceImage().height;
+}
+
 // Рисует картинку по центру квадрата size x size с сохранением пропорций.
 export function drawContain(ctx: CanvasRenderingContext2D, src: HTMLImageElement, size: number): void {
   ctx.imageSmoothingEnabled = false;
@@ -42,4 +47,27 @@ export function drawContain(ctx: CanvasRenderingContext2D, src: HTMLImageElement
   const w = src.width * scale;
   const h = src.height * scale;
   ctx.drawImage(src, (size - w) / 2, (size - h) / 2, w, h);
+}
+
+// Пикселизация: рисуем src уменьшенным до lowW×lowH и растягиваем обратно
+// до outW×outH без сглаживания. Возвращает готовый canvas.
+export function pixelate(
+  src: CanvasImageSource,
+  outW: number,
+  outH: number,
+  lowW: number,
+  lowH: number,
+): HTMLCanvasElement {
+  const small = document.createElement("canvas");
+  small.width = lowW;
+  small.height = lowH;
+  small.getContext("2d")!.drawImage(src, 0, 0, lowW, lowH);
+
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = outH;
+  const ctx = out.getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(small, 0, 0, lowW, lowH, 0, 0, outW, outH);
+  return out;
 }

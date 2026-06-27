@@ -21,7 +21,7 @@ export function showCharacterSelect(
 
     card.insertAdjacentHTML(
       "beforeend",
-      `<div class="nm">${ch.name}</div><div class="rl">${ch.roleLabel}</div><div class="loc">${ch.loc}</div>`,
+      `<div class="nm">${ch.name}</div><div class="rl">${ch.roleLabel}</div><div class="loc">${ch.areaLabel}</div>`,
     );
     card.onclick = () => {
       select.classList.add("hidden");

@@ -1,17 +1,16 @@
 import { LOCATIONS, type LocationDef } from "../data/locations";
+import type { KeyConsumer } from "./KeyboardRouter";
 
 // Меню выбора локации на парковке: ходить нельзя, вместо этого жмём кнопку нужной локации.
 // Навигация стрелками вверх/вниз, выбор — Enter.
-export class LocationMenu {
+export class LocationMenu implements KeyConsumer {
   private root = document.getElementById("parking") as HTMLDivElement;
   private list = document.getElementById("parkingBtns") as HTMLDivElement;
   private loc: LocationDef | null = null;
   private index = 0;
   private visible = false;
 
-  constructor(private onPick: (to: number, spawn: { x: number; y: number }) => void) {
-    window.addEventListener("keydown", (e) => this.onKey(e));
-  }
+  constructor(private onPick: (to: number, spawn: string) => void) {}
 
   show(loc: LocationDef): void {
     this.loc = loc;
@@ -47,17 +46,29 @@ export class LocationMenu {
     this.onPick(exit.to, exit.spawn);
   }
 
-  private onKey(e: KeyboardEvent): void {
-    if (!this.visible || !this.loc) return;
-    const n = this.loc.exits.length;
-    if (e.code === "ArrowUp" || e.code === "KeyW") {
-      this.index = (this.index + n - 1) % n;
-      this.refreshSel();
-    } else if (e.code === "ArrowDown" || e.code === "KeyS") {
-      this.index = (this.index + 1) % n;
-      this.refreshSel();
-    } else if (e.code === "Enter" || e.code === "Space") {
-      this.pick(this.index);
+  isActive(): boolean {
+    return this.visible && this.loc !== null;
+  }
+
+  handleKey(e: KeyboardEvent): boolean {
+    const n = this.loc!.exits.length;
+    switch (e.code) {
+      case "ArrowUp":
+      case "KeyW":
+        this.index = (this.index + n - 1) % n;
+        this.refreshSel();
+        return true;
+      case "ArrowDown":
+      case "KeyS":
+        this.index = (this.index + 1) % n;
+        this.refreshSel();
+        return true;
+      case "Enter":
+      case "Space":
+        this.pick(this.index);
+        return true;
+      default:
+        return false;
     }
   }
 }

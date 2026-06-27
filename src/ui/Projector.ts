@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import type { Character } from "../data/characters";
+import { pixelate } from "../entities/sprites";
 import { SAMPLE_SLIDES, slidePaths } from "./slides";
 
 // Прямоугольник экрана проектора в переговорке (мировые px фона).
@@ -11,7 +12,7 @@ export class Projector {
   private image: Phaser.GameObjects.Image;
   private btnBg: Phaser.GameObjects.Rectangle;
   private btnIcon: Phaser.GameObjects.Graphics;
-  private loader = new Image();
+  private loadToken = 0; // отсекает результаты устаревших загрузок при быстрой смене слайдов
 
   private slides: string[] = [];
   private index = 0;
@@ -25,9 +26,6 @@ export class Projector {
       .setDepth(SCREEN.y);
     [this.btnBg, this.btnIcon] = this.buildButton();
     this.setVisible(false);
-
-    this.loader.onload = () => this.draw();
-    this.loader.onerror = () => this.fallback();
   }
 
   show(npc: Character): void {
@@ -55,7 +53,15 @@ export class Projector {
   }
 
   private load(): void {
-    this.loader.src = this.slides[this.index];
+    const token = ++this.loadToken;
+    const img = new Image();
+    img.onload = () => {
+      if (token === this.loadToken) this.draw(img);
+    };
+    img.onerror = () => {
+      if (token === this.loadToken) this.fallback();
+    };
+    img.src = this.slides[this.index];
   }
 
   private fallback(): void {
@@ -66,28 +72,16 @@ export class Projector {
   }
 
   // Вписываем слайд в экран и пикселизуем (уменьшаем и растягиваем без сглаживания).
-  private draw(): void {
-    const { naturalWidth: w, naturalHeight: h } = this.loader;
+  private draw(img: HTMLImageElement): void {
+    const { naturalWidth: w, naturalHeight: h } = img;
     const fit = Math.min(SCREEN.w / w, SCREEN.h / h);
     const outW = Math.max(1, Math.round(w * fit));
     const outH = Math.max(1, Math.round(h * fit));
     const lowW = Math.max(1, Math.round(outW / BLOCK));
     const lowH = Math.max(1, Math.round(outH / BLOCK));
 
-    const small = document.createElement("canvas");
-    small.width = lowW;
-    small.height = lowH;
-    small.getContext("2d")!.drawImage(this.loader, 0, 0, lowW, lowH);
-
-    const out = document.createElement("canvas");
-    out.width = outW;
-    out.height = outH;
-    const ctx = out.getContext("2d")!;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(small, 0, 0, lowW, lowH, 0, 0, outW, outH);
-
     if (this.scene.textures.exists(TEX_KEY)) this.scene.textures.remove(TEX_KEY);
-    this.scene.textures.addCanvas(TEX_KEY, out);
+    this.scene.textures.addCanvas(TEX_KEY, pixelate(img, outW, outH, lowW, lowH));
     this.image.setTexture(TEX_KEY);
   }
 
