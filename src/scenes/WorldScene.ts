@@ -9,11 +9,12 @@ import { Projector } from "../ui/Projector";
 import { LocationMenu } from "../ui/LocationMenu";
 import { KeyboardRouter } from "../ui/KeyboardRouter";
 import { showCharacterSelect } from "../ui/CharacterSelect";
-import { LocationLoader } from "./LocationLoader";
+import { LocationLoader, type Spawn, type PlacedNpc } from "./LocationLoader";
 
 const SPEED = 400;
 const INTERACT_DIST = 80;
-const TARGET_H = 74;   // экранная высота персонажа в пикселях
+const TARGET_H = 74;       // экранная высота персонажа в пикселях
+const EXIT_ZONE_HALF = 52; // полразмера зоны срабатывания выхода вокруг точки двери
 
 const DEPTH = {
   prompt: 1_000_000,
@@ -25,7 +26,7 @@ const DEPTH = {
 export class WorldScene extends Phaser.Scene {
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private walls!: Phaser.Physics.Arcade.StaticGroup;
-  private npcs: Character[] = [];
+  private npcs: PlacedNpc[] = [];
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private router!: KeyboardRouter;
@@ -35,13 +36,14 @@ export class WorldScene extends Phaser.Scene {
   private slides!: SlideViewer;
   private projector!: Projector;
   private prompt!: Phaser.GameObjects.Text;
-  private nearest: Character | null = null;
-  private talking: Character | null = null;
+  private nearest: PlacedNpc | null = null;
+  private talking: PlacedNpc | null = null;
   private started = false;
 
   private chosen!: Character;
   private locIndex = 0;
   private atParking = false;
+  private doors: Map<string, Spawn> = new Map(); // двери текущей локации (ключ — id соседней локации)
   private menu!: LocationMenu;
   private exitBtn = document.getElementById("exitBtn") as HTMLButtonElement;
   private exitLabel = document.getElementById("exitLabel") as HTMLSpanElement;
@@ -92,7 +94,7 @@ export class WorldScene extends Phaser.Scene {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keys = this.input.keyboard!.addKeys("W,A,S,D,SPACE") as Record<string, Phaser.Input.Keyboard.Key>;
 
-    this.menu = new LocationMenu((to, spawn) => this.goTo(to, spawn));
+    this.menu = new LocationMenu((to) => this.goTo(to));
 
     // Потребители ввода по приоритету: слайды поверх диалога поверх меню парковки,
     // ниже — выход в дверь по Enter (когда нет модалок и игрок стоит в зоне выхода).
@@ -116,25 +118,28 @@ export class WorldScene extends Phaser.Scene {
 
   private startAs(chosen: Character): void {
     this.chosen = chosen;
-    this.player = this.physics.add.sprite(chosen.x, chosen.y, chosen.sprite);
+    this.player = this.physics.add.sprite(0, 0, chosen.sprite);
     this.player.setScale(spriteScale(this, chosen.sprite, TARGET_H)).setDepth(DEPTH.player);
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.walls);
 
-    // Игрок стартует на позиции своего персонажа в главном офисе — спавн не задаём.
+    // Без fromId — игрок встанет на точку своего персонажа из слоя spawns.
     this.loadLocation(0);
     this.started = true;
   }
 
-  // Строит локацию index, снося предыдущую. Если задан spawnName — ставит игрока
-  // в одноимённую точку слоя spawns этой локации.
-  private loadLocation(index: number, spawnName?: string): void {
+  // Строит локацию index, снося предыдущую. fromId — id локации, откуда пришли:
+  // игрок встаёт в одноимённую дверь (слой doors); если её нет (фаст-тревел с парковки
+  // в локацию без её двери) — в первую дверь. undefined — старт игры: игрок встаёт в
+  // точку своего персонажа (слой spawns).
+  private loadLocation(index: number, fromId?: string): void {
     const cfg = LOCATIONS[index];
     this.locIndex = index;
     this.atParking = !!cfg.isParking;
 
-    const { npcs, spawns } = this.loader.load(cfg, index, this.chosen.id);
+    const { npcs, doors, spawns } = this.loader.load(cfg, index, this.chosen.id);
     this.npcs = npcs;
+    this.doors = doors;
 
     this.player.setVisible(!this.atParking);
     if (this.atParking) {
@@ -143,20 +148,21 @@ export class WorldScene extends Phaser.Scene {
       this.menu.show(cfg);
     } else {
       this.menu.hide();
-      if (spawnName !== undefined) {
-        const p = spawns.get(spawnName);
-        if (p) this.player.setPosition(p.x, p.y);
-      }
+      const p =
+        fromId !== undefined
+          ? doors.get(fromId) ?? doors.values().next().value
+          : spawns.get(this.chosen.id);
+      if (p) this.player.setPosition(p.x, p.y);
     }
   }
 
-  private goTo(to: number, spawn: string): void {
+  private goTo(to: number): void {
     this.showExit(null);
-    this.loadLocation(to, spawn);
+    this.loadLocation(to, LOCATIONS[this.locIndex].id);
   }
 
   private triggerExit(): void {
-    if (this.currentExit) this.goTo(this.currentExit.to, this.currentExit.spawn);
+    if (this.currentExit) this.goTo(this.currentExit.to);
   }
 
   private showExit(exit: ExitDef | null): void {
@@ -170,15 +176,15 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  // Первый выход, в зоне которого находится игрок.
+  // Первый выход, рядом с дверью которого стоит игрок. Дверь — точка слоя doors
+  // с именем = id целевой локации; зона срабатывания — квадрат вокруг неё.
   private findExit(): ExitDef | null {
     for (const exit of LOCATIONS[this.locIndex].exits) {
-      const z = exit.zone;
+      const door = this.doors.get(LOCATIONS[exit.to].id);
       if (
-        this.player.x >= z.x &&
-        this.player.x <= z.x + z.w &&
-        this.player.y >= z.y &&
-        this.player.y <= z.y + z.h
+        door &&
+        Math.abs(this.player.x - door.x) <= EXIT_ZONE_HALF &&
+        Math.abs(this.player.y - door.y) <= EXIT_ZONE_HALF
       ) {
         return exit;
       }
@@ -230,7 +236,7 @@ export class WorldScene extends Phaser.Scene {
       this.prompt.setPosition(this.nearest.x, this.nearest.y - TARGET_H * 0.85).setVisible(true);
       if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
         this.talking = this.nearest;
-        this.dialogue.open(this.nearest);
+        this.dialogue.open(this.nearest.char);
       }
     } else {
       this.prompt.setVisible(false);

@@ -1,12 +1,11 @@
 // Локации игры и связи между ними.
 // overlay и map (коллизии) могут отсутствовать — тогда просто не рисуются.
-// Зоны выходов (zone) — заготовки, их подгоняют под двери на картинках.
-// Точка появления (spawn) — имя объекта в слое spawns карты целевой локации.
+// Геометрия дверей живёт в Tiled, в слое spawns: одна точка на дверь, её имя = id
+// соседней локации. Эта точка задаёт и место появления (когда входишь из соседа),
+// и зону срабатывания выхода (когда уходишь к соседу). В коде — только топология.
 
 export interface ExitDef {
-  to: number;                                            // индекс целевой локации в LOCATIONS
-  zone: { x: number; y: number; w: number; h: number };  // зона у двери (для парковки игнорируется)
-  spawn: string;                                         // имя точки в слое spawns целевой локации
+  to: number; // индекс целевой локации в LOCATIONS
 }
 
 export interface LocationDef {
@@ -36,14 +35,7 @@ export const LOCATIONS: LocationDef[] = [
     bg: "main-office-bg",
     overlay: "main-office-overlay",
     map: "main-office-map",
-    exits: [
-      // Дверь в чилл-зону — вдоль верхней стены комнаты с ноутбуками.
-      { to: LOC.chillZone, zone: { x: 300, y: 28, w: 88, h: 56 }, spawn: "entry" },
-      // Дверь в дата-центр — вдоль левой стены комнаты с ноутбуками (двери на картинке пока нет).
-      { to: LOC.dataCenter, zone: { x: 28, y: 150, w: 56, h: 96 }, spawn: "entry" },
-      // Выход на парковку — внизу карты (на парковке ходить нельзя, точка не нужна).
-      { to: LOC.parking, zone: { x: 588, y: 704, w: 88, h: 64 }, spawn: "" },
-    ],
+    exits: [{ to: LOC.chillZone }, { to: LOC.dataCenter }, { to: LOC.parking }],
   },
   {
     id: "chill-zone",
@@ -52,10 +44,7 @@ export const LOCATIONS: LocationDef[] = [
     bg: "chill-zone-bg",
     overlay: "chill-zone-overlay",
     map: "chill-zone-map",
-    exits: [
-      // Назад в главный офис — игрок появляется у верхней стены комнаты с ноутбуками.
-      { to: LOC.mainOffice, zone: { x: 660, y: 704, w: 88, h: 64 }, spawn: "chillDoor" },
-    ],
+    exits: [{ to: LOC.mainOffice }],
   },
   {
     id: "vietnam-beach",
@@ -64,10 +53,8 @@ export const LOCATIONS: LocationDef[] = [
     bg: "vietnam-beach-bg",
     overlay: "vietnam-beach-overlay",
     map: "vietnam-beach-map",
-    exits: [
-      // С пляжа можно вернуться только на парковку.
-      { to: LOC.parking, zone: { x: 660, y: 704, w: 88, h: 64 }, spawn: "" },
-    ],
+    // С пляжа можно вернуться только на парковку.
+    exits: [{ to: LOC.parking }],
   },
   {
     id: "data-center",
@@ -76,11 +63,8 @@ export const LOCATIONS: LocationDef[] = [
     bg: "data-center-bg",
     overlay: "data-center-overlay",
     map: "data-center-map",
-    exits: [
-      // Единственная дверь дата-центра — внизу. Через неё возвращаемся в офис,
-      // где появляемся у левой стены комнаты с ноутбуками.
-      { to: LOC.mainOffice, zone: { x: 196, y: 700, w: 104, h: 64 }, spawn: "dataDoor" },
-    ],
+    // Единственная дверь дата-центра — внизу. Через неё возвращаемся в офис.
+    exits: [{ to: LOC.mainOffice }],
   },
   {
     id: "parking",
@@ -88,12 +72,12 @@ export const LOCATIONS: LocationDef[] = [
     enterLabel: "На парковку",
     bg: "parking-bg",
     isParking: true,
-    // Для парковки zone не используется — это пункты меню. spawn — имя точки в целевой локации.
+    // У парковки нет карты — выходы это пункты меню (фаст-тревел), без геометрии.
     exits: [
-      { to: LOC.mainOffice, zone: { x: 0, y: 0, w: 0, h: 0 }, spawn: "parkingDoor" },
-      { to: LOC.chillZone, zone: { x: 0, y: 0, w: 0, h: 0 }, spawn: "entry" },
-      { to: LOC.vietnamBeach, zone: { x: 0, y: 0, w: 0, h: 0 }, spawn: "entry" },
-      { to: LOC.dataCenter, zone: { x: 0, y: 0, w: 0, h: 0 }, spawn: "entry" },
+      { to: LOC.mainOffice },
+      { to: LOC.chillZone },
+      { to: LOC.vietnamBeach },
+      { to: LOC.dataCenter },
     ],
   },
 ];

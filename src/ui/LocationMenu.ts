@@ -10,7 +10,7 @@ export class LocationMenu implements KeyConsumer {
   private index = 0;
   private visible = false;
 
-  constructor(private onPick: (to: number, spawn: string) => void) {}
+  constructor(private onPick: (to: number) => void) {}
 
   show(loc: LocationDef): void {
     this.loc = loc;
@@ -42,8 +42,7 @@ export class LocationMenu implements KeyConsumer {
 
   private pick(i: number): void {
     if (!this.loc) return;
-    const exit = this.loc.exits[i];
-    this.onPick(exit.to, exit.spawn);
+    this.onPick(this.loc.exits[i].to);
   }
 
   isActive(): boolean {

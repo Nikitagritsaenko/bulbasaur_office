@@ -3,9 +3,19 @@ import { CHARACTERS, type Character } from "../data/characters";
 import type { LocationDef } from "../data/locations";
 import { spriteScale } from "../entities/sprites";
 
+export type Spawn = { x: number; y: number };
+
+// NPC вместе с его позицией на карте (позиция берётся из слоя spawns, не из данных).
+export interface PlacedNpc {
+  char: Character;
+  x: number;
+  y: number;
+}
+
 export interface LoadedLocation {
-  npcs: Character[];                      // NPC, стоящие в этой локации
-  spawns: Map<string, { x: number; y: number }>; // точки появления из слоя spawns карты
+  npcs: PlacedNpc[];          // NPC этой локации с координатами
+  doors: Map<string, Spawn>;  // двери (слой doors, ключ — id соседней локации)
+  spawns: Map<string, Spawn>; // точки появления персонажей (слой spawns, ключ — id персонажа)
 }
 
 // Строит сцену локации: фон, overlay двери, коллизии и NPC. Держит у себя список
@@ -33,20 +43,25 @@ export class LocationLoader {
       );
     }
 
-    const spawns = cfg.map ? this.buildFromMap(cfg.map) : new Map();
+    const { doors, spawns } = cfg.map
+      ? this.buildFromMap(cfg.map)
+      : { doors: new Map<string, Spawn>(), spawns: new Map<string, Spawn>() };
 
-    const npcs = cfg.isParking
+    const npcs: PlacedNpc[] = cfg.isParking
       ? []
-      : CHARACTERS.filter((c) => (c.locationIndex ?? 0) === locIndex && c.id !== chosenId);
-    for (const c of npcs) this.addNpc(c);
+      : CHARACTERS.filter((c) => (c.locationIndex ?? 0) === locIndex && c.id !== chosenId)
+          .map((char) => ({ char, ...(spawns.get(char.id) ?? { x: 0, y: 0 }) }));
+    for (const npc of npcs) this.addNpc(npc);
 
-    return { npcs, spawns };
+    return { npcs, doors, spawns };
   }
 
-  // Из карты Tiled: прямоугольники слоя collision -> стены, точки слоя spawns -> точки появления.
-  private buildFromMap(mapKey: string): Map<string, { x: number; y: number }> {
-    const spawns = new Map<string, { x: number; y: number }>();
-    if (!this.scene.cache.tilemap.exists(mapKey)) return spawns;
+  // Из карты Tiled: collision -> стены, doors -> двери (имя = id соседней локации),
+  // spawns -> точки появления персонажей (имя = id персонажа).
+  private buildFromMap(mapKey: string): { doors: Map<string, Spawn>; spawns: Map<string, Spawn> } {
+    const doors = new Map<string, Spawn>();
+    const spawns = new Map<string, Spawn>();
+    if (!this.scene.cache.tilemap.exists(mapKey)) return { doors, spawns };
 
     const map = this.scene.make.tilemap({ key: mapKey });
 
@@ -58,25 +73,30 @@ export class LocationLoader {
       this.walls.add(rect);
     });
 
+    map.getObjectLayer("doors")?.objects.forEach((o) => {
+      doors.set(o.name, { x: o.x ?? 0, y: o.y ?? 0 });
+    });
+
     map.getObjectLayer("spawns")?.objects.forEach((o) => {
       spawns.set(o.name, { x: o.x ?? 0, y: o.y ?? 0 });
     });
 
-    return spawns;
+    return { doors, spawns };
   }
 
-  private addNpc(c: Character): void {
+  private addNpc(npc: PlacedNpc): void {
+    const { char, x, y } = npc;
     this.scenery.push(
       this.scene.add
-        .image(c.x, c.y, c.sprite)
-        .setScale(spriteScale(this.scene, c.sprite, this.targetH))
+        .image(x, y, char.sprite)
+        .setScale(spriteScale(this.scene, char.sprite, this.targetH))
         .setOrigin(0.5, 0.5)
-        .setFlipX(!!c.faceRight)
-        .setDepth(c.y),
+        .setFlipX(!!char.faceRight)
+        .setDepth(y),
     );
     this.scenery.push(
       this.scene.add
-        .text(c.x, c.y - this.targetH * 0.62, c.name, {
+        .text(x, y - this.targetH * 0.62, char.name, {
           fontFamily: "Trebuchet MS",
           fontSize: "13px",
           color: "#ffffff",
@@ -84,7 +104,7 @@ export class LocationLoader {
           padding: { x: 5, y: 2 },
         })
         .setOrigin(0.5)
-        .setDepth(c.y),
+        .setDepth(y),
     );
   }
 }
