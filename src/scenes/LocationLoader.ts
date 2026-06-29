@@ -13,9 +13,10 @@ export interface PlacedNpc {
 }
 
 export interface LoadedLocation {
-  npcs: PlacedNpc[];          // NPC этой локации с координатами
-  doors: Map<string, Spawn>;  // двери (слой doors, ключ — id соседней локации)
-  spawns: Map<string, Spawn>; // точки появления персонажей (слой spawns, ключ — id персонажа)
+  npcs: PlacedNpc[];                 // NPC этой локации с координатами
+  doors: Map<string, Spawn>;         // двери (слой doors, ключ — id соседней локации)
+  spawns: Map<string, Spawn>;        // точки появления персонажей (слой spawns, ключ — id персонажа)
+  interactions: Map<string, Spawn>;  // интерактивные объекты (слой interactions, напр. "tv")
 }
 
 // Строит сцену локации: фон, overlay двери, коллизии и NPC. Держит у себя список
@@ -43,9 +44,10 @@ export class LocationLoader {
       );
     }
 
-    const { doors, spawns } = cfg.map
+    const empty = () => new Map<string, Spawn>();
+    const { doors, spawns, interactions } = cfg.map
       ? this.buildFromMap(cfg.map)
-      : { doors: new Map<string, Spawn>(), spawns: new Map<string, Spawn>() };
+      : { doors: empty(), spawns: empty(), interactions: empty() };
 
     const npcs: PlacedNpc[] = cfg.isParking
       ? []
@@ -53,15 +55,18 @@ export class LocationLoader {
           .map((char) => ({ char, ...(spawns.get(char.id) ?? { x: 0, y: 0 }) }));
     for (const npc of npcs) this.addNpc(npc);
 
-    return { npcs, doors, spawns };
+    return { npcs, doors, spawns, interactions };
   }
 
   // Из карты Tiled: collision -> стены, doors -> двери (имя = id соседней локации),
-  // spawns -> точки появления персонажей (имя = id персонажа).
-  private buildFromMap(mapKey: string): { doors: Map<string, Spawn>; spawns: Map<string, Spawn> } {
+  // spawns -> точки персонажей (имя = id персонажа), interactions -> интерактивные объекты.
+  private buildFromMap(
+    mapKey: string,
+  ): { doors: Map<string, Spawn>; spawns: Map<string, Spawn>; interactions: Map<string, Spawn> } {
     const doors = new Map<string, Spawn>();
     const spawns = new Map<string, Spawn>();
-    if (!this.scene.cache.tilemap.exists(mapKey)) return { doors, spawns };
+    const interactions = new Map<string, Spawn>();
+    if (!this.scene.cache.tilemap.exists(mapKey)) return { doors, spawns, interactions };
 
     const map = this.scene.make.tilemap({ key: mapKey });
 
@@ -73,15 +78,16 @@ export class LocationLoader {
       this.walls.add(rect);
     });
 
-    map.getObjectLayer("doors")?.objects.forEach((o) => {
-      doors.set(o.name, { x: o.x ?? 0, y: o.y ?? 0 });
-    });
+    const readPoints = (layer: string, into: Map<string, Spawn>) =>
+      map.getObjectLayer(layer)?.objects.forEach((o) => {
+        into.set(o.name, { x: o.x ?? 0, y: o.y ?? 0 });
+      });
 
-    map.getObjectLayer("spawns")?.objects.forEach((o) => {
-      spawns.set(o.name, { x: o.x ?? 0, y: o.y ?? 0 });
-    });
+    readPoints("doors", doors);
+    readPoints("spawns", spawns);
+    readPoints("interactions", interactions);
 
-    return { doors, spawns };
+    return { doors, spawns, interactions };
   }
 
   private addNpc(npc: PlacedNpc): void {
